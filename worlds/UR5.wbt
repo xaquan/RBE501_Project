@@ -9,8 +9,8 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/project
 WorldInfo {
 }
 Viewpoint {
-  orientation -0.23203013661389846 -0.1616183825405716 0.9591879451535581 4.451770640286033
-  position 1.3120983096241146 3.2659692098018227 2.642536958235308
+  orientation -0.2552660154258408 0.004193756290076459 0.9668617655987819 2.4577804169453765
+  position 1.0318071551249735 -0.41991562592374376 0.9244234310634349
 }
 TexturedBackground {
 }
@@ -30,39 +30,46 @@ RectangleArena {
   }
 }
 UR5e {
-  hidden position_0_0 5.102564556942529e-09
-  hidden position_1_0 -1.368284104098067
-  hidden linearVelocity_1 1.8859397675162079e-06 -3.1330645073294616e-10 1.894273377087366e-06
-  hidden angularVelocity_1 1.8576486184325772e-07 -7.32487564559798e-06 -1.1502539669575645e-06
-  hidden rotation_2 0 1 0 0.20251189590193353
-  hidden position_2_0 1.8311536529366919
-  hidden linearVelocity_2 -0.058374598598766966 -1.3285393917549374e-07 0.012331693842507166
-  hidden angularVelocity_2 1.4517812124566967e-06 -0.2807537121892361 3.851072042198548e-06
-  hidden rotation_3 0 1 0 1.8311536529366919
-  hidden position_3_0 -1.5707950100360804
-  hidden linearVelocity_3 -0.07265074037198554 1.684190153915001e-06 0.11027758077515708
-  hidden angularVelocity_3 3.0225551190785954e-06 -0.6417162241068244 1.305832329956466e-05
-  hidden rotation_4 0 1 0 9.897781554112306e-07
-  hidden position_4_0 -1.5707963231168165
-  hidden linearVelocity_4 -0.001500184867946239 4.8301423753543865e-06 0.24840674864702897
-  hidden angularVelocity_4 2.8407428288021284e-06 -0.6417156620930243 1.6221214769747393e-05
-  hidden rotation_5 0 0 -1 1.5707963231168165
-  hidden position_5_0 4.6819338317420276e-09
-  hidden linearVelocity_5 0.027901276584812007 6.403037372418815e-06 0.30548476660294466
-  hidden angularVelocity_5 2.8091706525694467e-06 -0.641714792120535 1.623746978934959e-05
-  hidden linearVelocity_6 0.0684266738573528 6.0522615005683915e-06 0.2846107112760276
-  hidden angularVelocity_6 2.830011528336959e-06 -0.6417146113749753 1.6277881904127596e-05
+  hidden position_0_0 -1.0451413318082005e-07
+  hidden rotation_1 0 0 -0.9999999999999999 1.032382731180714e-07
+  hidden position_1_0 -1.7408612672691557
+  hidden rotation_2 0 -1 0 0.1700652672691525
+  hidden position_2_0 1.3521466329778387
+  hidden rotation_3 0 0.9999999999999999 0 1.3521466329778387
+  hidden position_3_0 1.5708010750504824
+  hidden rotation_4 0 1 0 3.1415970750504822
+  hidden position_4_0 1.5707991188211097
+  hidden rotation_5 0 0 0.9999999999999999 1.5707991188211095
+  hidden position_5_0 6.513972396901911e-07
+  hidden translation_6 -3.2122783568350847e-09 7.913847614571246e-05 0.10001103294106604
+  hidden rotation_6 0.33816087606091516 0.9410883078437143 -0.0001368998491581317 5.170509687929607e-07
+  name "UR5e(1)"
   controller "robot_controller"
   toolSlot [
     VacuumGripper {
-      translation 0 0.02 -3.67318e-08
-      rotation 1 0 0 1.5708
+      translation 0 0.025 0
+      rotation 1 0 0 -1.5707953071795862
+      physics Physics {
+        mass 0.1
+        centerOfMass [
+          0 0 0
+        ]
+        inertiaMatrix [
+          1 1 1
+          0 0 0
+        ]
+      }
+    }
+    Receiver {
+      name "serial_receiver"
+      channel 1
+      baudRate 112500
     }
   ]
 }
 DEF box1 Solid {
-  translation 0.5 -0.4994858169319929 0.049607600059022386
-  rotation 0.3119235169100404 -0.6806323937478155 -0.662905169824154 9.823815547473479e-17
+  translation 0.5 -0.4994858169319929 0.04960760000000001
+  rotation 0.31800713413690457 -0.06471724308615708 -0.9458769164565546 1.7679581179959843e-16
   children [
     Shape {
       appearance PBRAppearance {
@@ -87,12 +94,13 @@ DEF box1 Solid {
       0 0 0
     ]
   }
-  linearVelocity -3.084837654426126e-17 -9.182721149397612e-18 -4.622435767487684e-10
-  angularVelocity -7.888609052210118e-31 -7.993605777301122e-16 -1.6083661422397076e-16
+  recognitionColors [
+    0 0 0
+  ]
 }
 DEF box2 Solid {
-  translation 0.73 0.46 0.049803800029789
-  rotation 0.3797391715346843 0.07594783430694968 0.9219707631298487 1.1226801800116988e-16
+  translation 0.73 0.46 0.0498038
+  rotation -0.6478567621916407 0.7342376638172173 -0.20292035066695263 4.935415507748849e-17
   children [
     Shape {
       appearance PBRAppearance {
@@ -119,17 +127,23 @@ DEF box2 Solid {
       0 0 0
     ]
   }
-  linearVelocity 1.3737042578109861e-17 7.790705033656093e-20 -2.3301134888243145e-10
-  angularVelocity 2.664535259100376e-16 3.996802888650563e-16 -3.078416388379422e-17
+  recognitionColors [
+    0 0 0
+  ]
 }
 DEF Camera Robot {
-  translation 0.13918 -0.08 1.79768
+  translation 0 0 1.8
   rotation 0 1 0 1.5708
   children [
     Camera {
       translation 0 -1.24906e-06 0.17
       rotation 1 0 0 -3.1415853071795863
       children [
+        Emitter {
+          name "serial_emitter"
+          channel 1
+          baudRate 112500
+        }
         Shape {
           appearance PBRAppearance {
             baseColor 0.5 0.6 0.9
@@ -140,11 +154,14 @@ DEF Camera Robot {
           }
         }
       ]
-      name "top_camera"
+      name "overhead_camera"
       fieldOfView 1.2
       width 128
       height 96
+      recognition Recognition {
+      }
     }
   ]
+  name "camera"
   controller "camera_controller"
 }
