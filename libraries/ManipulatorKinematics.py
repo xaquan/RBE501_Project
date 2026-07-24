@@ -1,6 +1,6 @@
 import numpy as np
 import sympy as sp
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 #=================================================
 # Optimized Forward Kinematics and Inverse Kinematics Module
 #=================================================
@@ -216,25 +216,41 @@ class FK_Exponential:
     
     def _compute_jacobian(self) -> None:
         """
-        Compute full Jacobian matrix (6 x n).
-        Optimized by vectorizing where possible.
+        Compute the space Jacobian matrix (6 x n).
+
+        The screw axes supplied to this class are expressed in the fixed
+        (space) frame.  Each column therefore has to be transformed by the
+        exponentials of the preceding joints.  Using the z-axis of each
+        displayed link frame is not valid for a general POE model.
         """
         if self._transformation_matrices is None:
             raise ValueError("Transformation matrices not computed.")
-        
+
         J = sp.zeros(6, self.joint_count)
-        p_ee = sp.Matrix(self._transformation_matrices[-1][:3, 3])  # End-effector position
-        
-        # Skip last transformation matrix (it's the end-effector itself)
-        for i in range(len(self._transformation_matrices) - 1):
-            T_i = self._transformation_matrices[i]
-            z_i = sp.Matrix(T_i[:3, 2])  # z-axis
-            p_i = sp.Matrix(T_i[:3, 3])  # position
-            
-            Jv = z_i.cross(p_ee - p_i)
-            J_col = sp.Matrix.vstack(Jv, z_i)
-            J[:, i] = J_col
-        
+        p_ee = sp.Matrix(self._transformation_matrices[-1][:3, 3])
+        preceding_transform = sp.eye(4)
+
+        for i, (omega_home, velocity_home) in enumerate(
+            zip(self.home_omegas, self._velocities)
+        ):
+            rotation = preceding_transform[:3, :3]
+            translation = preceding_transform[:3, 3]
+
+            omega = rotation * sp.Matrix(omega_home)
+            velocity = (
+                translation.cross(omega)
+                + rotation * sp.Matrix(velocity_home)
+            )
+
+            # A spatial twist [omega, velocity] gives point velocity
+            # omega x p + velocity at a point p in the space frame.
+            linear_velocity = omega.cross(p_ee) + velocity
+            J[:, i] = sp.Matrix.vstack(linear_velocity, omega)
+
+            preceding_transform = (
+                preceding_transform * self._rodrigues_rotation_matrices[i]
+            )
+
         self._jacobian_matrix = J
 
     def _compute_jacobians(self) -> None:
@@ -299,7 +315,7 @@ class FK_Exponential:
         if self._jacobian_matrix is None:
             raise ValueError("Jacobian matrix not computed.")
         Jv = self._jacobian_matrix[:3, :]
-        return Jv.det() == 0
+        return Jv.rank() < min(Jv.shape)
 
 
 #=================================================
@@ -348,7 +364,7 @@ class IK_Numerical:
         desired_position = np.array(desired_position, dtype=float).ravel()
         
         self.fk.set_thetas(thetas)
-        current_position = self.fk.get_current_position().ravel()
+        current_position = np.array(self.fk.get_current_position(), dtype=float).ravel()
         position_error = desired_position - current_position
         norm_error = np.linalg.norm(position_error)
         
@@ -364,7 +380,7 @@ class IK_Numerical:
             
             # Update position and error
             self.fk.set_thetas(thetas)
-            current_position = self.fk.get_current_position().ravel()
+            current_position = np.array(self.fk.get_current_position(), dtype=float).ravel()
             position_error = desired_position - current_position
             norm_error = np.linalg.norm(position_error)
             
@@ -379,3 +395,68 @@ class IK_Numerical:
         
         raise ValueError(f"IK did not converge within {max_iterations} iterations. "
                         f"Final error: {norm_error:.6e}")
+
+
+def create_webots_ur5e_kinematics(
+    initial_thetas: Optional[List] = None
+) -> Tuple[FK_Exponential, IK_Numerical]:
+    """Create matching FK and IK objects for Webots R2025a ``UR5e.proto``.
+
+    Positions are in metres and are expressed in the Webots robot base/world
+    frame for a robot whose translation and rotation are both zero.  The final
+    frame is the UR5e ``toolSlot`` origin.
+    """
+    if initial_thetas is None:
+        initial_thetas = [0.0] * 6
+    if len(initial_thetas) != 6:
+        raise ValueError("The UR5e model requires six joint angles.")
+
+    joint_points = [
+        [0.000, 0.000, 0.163],
+        [0.000, 0.138, 0.163],
+        [0.425, 0.007, 0.163],
+        [0.817, 0.007, 0.163],
+        [0.817, 0.134, 0.163],
+        [0.817, 0.134, 0.063],
+    ]
+    joint_axes = [
+        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+    ]
+
+    # Home transforms for the six successive frames.  Only the final
+    # transform affects end-effector FK, but all are retained for inspection.
+    identity_rotation = [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+    frame_positions = joint_points[:-1] + [[0.817, 0.234, 0.063]]
+    home_transforms = []
+    for position in frame_positions:
+        transform = [
+            identity_rotation[0] + [position[0]],
+            identity_rotation[1] + [position[1]],
+            identity_rotation[2] + [position[2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+        home_transforms.append(transform)
+
+    # At home, the wrist/tool frame is rotated pi about the base y-axis.
+    home_transforms[-1][:3] = [
+        [-1.0, 0.0, 0.0, 0.817],
+        [0.0, 1.0, 0.0, 0.234],
+        [0.0, 0.0, -1.0, 0.063],
+    ]
+
+    fk = FK_Exponential(
+        home_transforms,
+        joint_axes,
+        joint_points,
+        initial_thetas,
+    )
+    return fk, IK_Numerical(fk)

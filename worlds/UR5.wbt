@@ -65,6 +65,9 @@ UR5e {
       channel 1
       baudRate 112500
     }
+    GPS {
+      name "ee_gps"
+    }
   ]
 }
 DEF box1 Solid {
