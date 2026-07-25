@@ -1,7 +1,7 @@
 import numpy as np
 import sympy as sp
-from manipulatorKinematics import FK_Exponential
-from lagrangianDynamic import LagrangeDynamic
+from manipulatorKinematicsOptimized import FK_Exponential
+from lagrangianDynamicOptimized import LagrangeDynamic
 
 
 def massPoint():
@@ -310,6 +310,8 @@ def ur5():
 
 
 if __name__ == "__main__":
-    ur5()
+    # Start with the smaller regression case. The fully symbolic UR5 model is
+    # substantially more expensive, even with the optimized dynamics builder.
     # massPoint()
+    ur5()
     # centerMass()
