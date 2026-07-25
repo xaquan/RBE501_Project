@@ -111,11 +111,11 @@ class FK_Exponential:
         cos_theta = sp.cos(theta)
         one_minus_cos = sp.Integer(1) - cos_theta
         
-        R = I + sin_theta * w_skew + one_minus_cos * (w_skew * w_skew)
+        R = I + sin_theta * w_skew + one_minus_cos * (w_skew * w_skew) # pyright: ignore[reportOperatorIssue]
         
         # Compute V matrix for translation
         theta_minus_sin = theta - sin_theta
-        V = (I * theta + one_minus_cos * w_skew + theta_minus_sin * (w_skew * w_skew)) * v
+        V = (I * theta + one_minus_cos * w_skew + theta_minus_sin * (w_skew * w_skew)) * v # pyright: ignore[reportOperatorIssue]
         
         result = sp.eye(4)
         result[:3, :3] = R
@@ -141,7 +141,8 @@ class FK_Exponential:
         trans_matrices = [T]
         rotation_matrices = []
         
-        for i, R in enumerate(rodrigues_matrices):
+        for i in range(self.joint_count):
+            R = rodrigues_matrices[i]
             T = T * R  # Cumulative product
             M_i = sp.Matrix(self.home_trans_mtx[i])
             trans = T * M_i
@@ -230,7 +231,7 @@ class FK_Exponential:
         p_ee = sp.Matrix(self._transformation_matrices[-1][:3, 3])
         preceding_transform = sp.eye(4)
 
-        for i, (omega_home, velocity_home) in enumerate(
+        for i, (omega_home, velocity_home) in enumerate( # pyright: ignore[reportGeneralTypeIssues]
             zip(self.home_omegas, self._velocities)
         ):
             rotation = preceding_transform[:3, :3]
@@ -248,7 +249,7 @@ class FK_Exponential:
             J[:, i] = sp.Matrix.vstack(linear_velocity, omega)
 
             preceding_transform = (
-                preceding_transform * self._rodrigues_rotation_matrices[i]
+                preceding_transform * self._rodrigues_rotation_matrices[i] # pyright: ignore[reportOptionalSubscript]
             )
 
         self._jacobian_matrix = J
@@ -259,7 +260,7 @@ class FK_Exponential:
             raise ValueError("Transformation matrices not computed.")
         
         jacobians = []
-        for i in range(self.joint_count):
+        for i in range(1, self.joint_count + 1):
             J_i = self._compute_joint_jacobian(i)
             jacobians.append(J_i)
         
@@ -269,19 +270,19 @@ class FK_Exponential:
         """Compute Jacobian for a specific joint."""
         if self._transformation_matrices is None:
             raise ValueError("Transformation matrices not computed.")
-        if not (0 <= joint_index < self.joint_count):
-            raise ValueError(f"Joint index {joint_index} out of range.")
+        if not (1 <= joint_index <= self.joint_count):
+            raise ValueError(f"Joint index {joint_index} out of range [1, {self.joint_count}]")
         
         J = sp.zeros(6, self.joint_count)
         T_e = sp.Matrix(self._transformation_matrices[joint_index])
         p_e = T_e[:3, 3]
-        
+        # print(f"Computing Jacobian for joint {joint_index}: p_e = {p_e}")
         for i in range(joint_index):
             T_i = sp.Matrix(self._transformation_matrices[i])
             p_i = T_i[:3, 3]
             z_i = T_i[:3, 2]
             
-            j = sp.Matrix.vstack(z_i.cross(p_e - p_i), z_i)
+            j = sp.Matrix.vstack(z_i.cross(p_e - p_i), z_i) # pyright: ignore[reportAttributeAccessIssue, reportOperatorIssue]
             J[:, i] = j
         
         return J
@@ -341,7 +342,7 @@ class IK_Numerical:
         alpha: float = 1.0,
         max_iterations: int = 100,
         epsilon: float = 1e-3,
-        verbose: bool = True
+        verbose: bool = False
     ) -> np.ndarray:
         """
         Solve inverse kinematics using Jacobian-based iterative method.
@@ -372,6 +373,7 @@ class IK_Numerical:
             # Get Jacobian and compute pseudo-inverse
             J = np.array(self.fk.get_jacobian_matrix(), dtype=float)
             Jv = J[:3, :]  # Linear velocity part
+            print(f"Jacobian (linear part) at iteration {iteration}:\n{Jv}")
             Jv_pinv = np.linalg.pinv(Jv)
             
             # Update joint angles
@@ -459,4 +461,89 @@ def create_webots_ur5e_kinematics(
         joint_points,
         initial_thetas,
     )
-    return fk, IK_Numerical(fk)
+
+    ik = IK_Numerical(fk)
+    return fk, ik
+
+
+def create_webots_ur5e_kinematics_symbolic(
+    initial_thetas: Optional[List] = None,
+) -> Tuple[FK_Exponential, dict]:
+    """Create a symbolic FK model for the Webots R2025a ``UR5e.proto``.
+
+    The returned ``FK_Exponential`` instance uses SymPy symbols for the link
+    lengths and the joint variables so the resulting transformation matrices,
+    Jacobian, and end-effector position stay symbolic until substitutions are
+    applied.
+
+    Returns:
+        A tuple of ``(fk, symbols)`` where ``symbols`` contains the length and
+        angle symbols grouped under the ``lengths`` and ``thetas`` keys.
+    """
+    length_symbols = list(
+        sp.symbols(
+            "base_z shoulder_y upper_arm_x elbow_y forearm_x wrist_y tool_y tool_z",
+            real=True,
+        )
+    )
+    theta_symbols = list(sp.symbols("t1:7", real=True))
+
+    if initial_thetas is None:
+        initial_thetas = theta_symbols
+    if len(initial_thetas) != 6:
+        raise ValueError("The UR5e model requires six joint angles.")
+
+    base_z, shoulder_y, upper_arm_x, elbow_y, forearm_x, wrist_y, tool_y, tool_z = (
+        length_symbols
+    )
+
+    joint_points = [
+        [0, 0, base_z],
+        [0, shoulder_y, base_z],
+        [upper_arm_x, elbow_y, base_z],
+        [forearm_x, elbow_y, base_z],
+        [forearm_x, wrist_y, base_z],
+        [forearm_x, tool_y, tool_z],
+    ]
+    joint_axes = [
+        [0, 0, 1],
+        [0, 1, 0],
+        [0, 1, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+        [0, 1, 0],
+    ]
+
+    identity_rotation = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+    ]
+    frame_positions = joint_points[:-1] + [[forearm_x, tool_y, tool_z]]
+    home_transforms = []
+    for position in frame_positions:
+        transform = [
+            identity_rotation[0] + [position[0]],
+            identity_rotation[1] + [position[1]],
+            identity_rotation[2] + [position[2]],
+            [0, 0, 0, 1],
+        ]
+        home_transforms.append(transform)
+
+    # At home, the wrist/tool frame is rotated pi about the base y-axis.
+    home_transforms[-1][:3] = [
+        [-1, 0, 0, forearm_x],
+        [0, 1, 0, tool_y],
+        [0, 0, -1, tool_z],
+    ]
+
+    fk = FK_Exponential(
+        home_transforms,
+        joint_axes,
+        joint_points,
+        initial_thetas,
+    )
+    return fk, {
+        "lengths": length_symbols,
+        "thetas": theta_symbols,
+    }
