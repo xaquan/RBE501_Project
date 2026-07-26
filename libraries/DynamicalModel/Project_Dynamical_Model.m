@@ -98,7 +98,7 @@ z5 = simplify(T05(1:3,3), 'Steps', 10);
 
 zero3 = sym(zeros(3,1));
 
-Jw1 = [z0, zero3 zero3, zero3, zero3, zero3];
+Jw1 = [z0, zero3, zero3, zero3, zero3, zero3];
 Jw2 = [z0, z1, zero3, zero3, zero3, zero3];
 Jw3 = [z0, z1, z2, zero3, zero3, zero3];
 Jw4 = [z0, z1, z2, z3, zero3, zero3];
@@ -132,13 +132,13 @@ g = sym('9.81');
 g0 = [0; 0; -g];
 
 % Define the inertia matrices for each link
-I1 = sym(zeros(3,3));
-I2 = sym(zeros(3,3));
-I3 = sym(zeros(3,3));
-I4 = sym(zeros(3,3));
-I5 = sym(zeros(3,3));
-I6 = sym(zeros(3,3));
-%I6(3,3) = sym('0.0002');
+I1 = zeros(3,3);
+I2 = zeros(3,3);
+I3 = zeros(3,3);
+I4 = zeros(3,3);
+I5 = zeros(3,3);
+I6 = zeros(3,3);
+I6(3,3) = 0.0002;
 
 R01 = T01(1:3,1:3);
 R02 = T02(1:3,1:3);
@@ -199,7 +199,6 @@ L = simplify(K_total - P_total, 'Steps', 10);
 q_col = q.';
 
 %Euler-lagrange Equations
-
 dL_dqdot = jacobian(L, q_dot).';
 dL_dq = jacobian(L, q_col).';
 
@@ -235,13 +234,88 @@ for i = 1:6
     end
 end
 
-Cqdot = simplify(C*q_dot, 'Steps', 20);
+Cqdot = simplify(C*q_dot, 'Steps', 10);
 
-M_display = simplify(vpa(M,6))
-Cqdot_display = simplify(vpa(Cqdot, 6))
-G_display = simplify(vpa(G,6))
+M_display = simplify(vpa(M,6));
+Cqdot_display = simplify(vpa(Cqdot, 6));
+G_display = simplify(vpa(G,6));
 
-%Torque at the stationary home position
-q_home = zeros(1,6);
-q_dot_home = zeros(6,1);
-q_dddot_home = zeros(6,1);
+% Numerical evaluation at home position
+%The objective of this and non-zero test below is to validate the dynamical model
+%If the M and M-2C matrices are seen to be skew symmetric, this will provide some
+%First level validation of the dynamical model
+
+
+q_home = zeros(6,1);
+qdot_home = zeros(6,1);
+
+M_home = double(subs(M, q_col, q_home));
+
+C_home = double(subs(C, ...
+    [q_col; q_dot], ...
+    [q_home; qdot_home]));
+
+G_home = double(subs(G, q_col, q_home));
+
+% Non-zerotest
+
+q_test = [
+     0.2;
+    -0.5;
+     0.7;
+    -0.3;
+     0.4;
+    -0.2
+];
+
+qdot_test = [
+     0.10;
+    -0.20;
+     0.15;
+     0.05;
+    -0.10;
+     0.08
+];
+
+qddot_test = [
+     0.30;
+    -0.10;
+     0.20;
+     0.05;
+    -0.15;
+     0.10
+];
+
+M_test = double(subs(M, q_col, q_test));
+
+C_test = double(subs(C, ...
+    [q_col; q_dot], ...
+    [q_test; qdot_test]));
+
+G_test = double(subs(G, q_col, q_test));
+
+%% Step 7 - Generate numerical model functions
+
+matlabFunction( ...
+    M, ...
+    'File', 'UR5e_M', ...
+    'Vars', {q_col}, ...
+    'Optimize', true);
+
+matlabFunction( ...
+    C, ...
+    'File', 'UR5e_C', ...
+    'Vars', {q_col, q_dot}, ...
+    'Optimize', true);
+
+matlabFunction( ...
+    G, ...
+    'File', 'UR5e_G', ...
+    'Vars', {q_col}, ...
+    'Optimize', true);
+
+%% Test generated numerical functions
+
+M_generated = UR5e_M(q_test);
+C_generated = UR5e_C(q_test, qdot_test);
+G_generated = UR5e_G(q_test);
