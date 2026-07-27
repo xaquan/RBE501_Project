@@ -1,4 +1,4 @@
-"""Move the UR5e through Cartesian positions using planned trajectories."""
+"""Move the UR5e through three Cartesian positions using planned trajectories."""
 
 from pathlib import Path
 import struct
@@ -29,29 +29,24 @@ JOINT_NAMES = [
 # Standard UR5e home configuration, in radians.
 HOME_Q = np.deg2rad([0.0, -90.0, 90.0, -90.0, -90.0, 0.0])
 
-# Stationary end-effector targets [x, y, z], in metres, expressed in the
-# Webots robot base frame. The last two points are 0.15 m above the top
-# surfaces of box1 and box2.
+# Three stationary end-effector targets [x, y, z], in metres, expressed in
+# the Webots robot base frame.
 CARTESIAN_TARGETS = np.array(
     [
         [0.366269, 0.555773, 0.235061],
         [0.470301, -0.280796, 0.248677],
         [-0.134000, 0.740002, 0.167520],
-        [0.500000, -0.499486, 0.249608],
-        [0.730000, 0.460000, 0.249804],
     ],
     dtype=float,
 )
 
 # Position-only IK has multiple solutions. These nearby guesses select
-# repeatable, joint-limit-safe solution branches for the targets.
+# repeatable, joint-limit-safe solution branches for the three targets.
 IK_INITIAL_GUESSES = np.deg2rad(
     [
         [48.0, -63.0, 93.0, -123.0, -87.0, 27.0],
         [-42.0, -78.0, 113.0, -128.0, -87.0, -33.0],
         [93.0, -48.0, 78.0, -123.0, -87.0, 42.0],
-        [-45.0, -50.0, 75.0, -115.0, -90.0, 0.0],
-        [35.0, -40.0, 50.0, -100.0, -90.0, 0.0],
     ]
 )
 
@@ -61,8 +56,9 @@ JOINT_TOLERANCE = np.deg2rad(0.5)
 IK_TOLERANCE = 1e-5
 VELOCITY_FILTER = 0.25
 
-# Fixed positive torque-feedback gains. LagrangeDynamicReal supplies the
-# inverse-dynamics feed-forward torque; these gains correct tracking error.
+# Torque feedback gains [N m/rad] and [N m s/rad]. The inverse-dynamics
+# trajectory torque is the feed-forward term; these gains reject model and
+# tracking errors.
 KP_TORQUE = np.array([80.0, 100.0, 70.0, 15.0, 10.0, 5.0])
 KD_TORQUE = np.array([12.0, 15.0, 10.0, 2.5, 1.5, 0.8])
 
@@ -95,9 +91,6 @@ torque_limits = np.array(
 )
 if np.any(torque_limits <= 0.0):
     raise RuntimeError("Every joint motor must have a positive maxTorque.")
-
-for joint_name, kp, kd in zip(JOINT_NAMES, KP_TORQUE, KD_TORQUE):
-    print(f"{joint_name}: kp={kp:.4f}, kd={kd:.4f}")
 
 
 def measured_joints() -> np.ndarray:
@@ -132,7 +125,7 @@ def command_torques(
     measured_q: np.ndarray,
     measured_qdot: np.ndarray,
 ) -> None:
-    """Apply Lagrange feed-forward torque plus calculated PD feedback."""
+    """Apply inverse-dynamics feed-forward torque plus PD feedback."""
     position_error = desired_q - measured_q
     velocity_error = desired_qdot - measured_qdot
     feedback_torque = (
@@ -205,12 +198,12 @@ def plan_trajectories(target_joints: list[np.ndarray]):
 
 
 def receive_camera_objects(
-    detected_objects_robot: dict[int, np.ndarray],
+    detected_objects_world: dict[int, np.ndarray],
 ) -> None:
-    """Decode packets and retain each position in the robot base frame.
+    """Decode every queued camera packet and retain its world position.
 
-    The camera controller performs the camera-to-robot conversion before
-    packing ``(object_id, robot_x, robot_y, robot_z)``. Therefore, these
+    The camera controller performs the camera-to-world conversion before
+    packing ``(object_id, world_x, world_y, world_z)``. Therefore, these
     received coordinates must not be transformed again here.
     """
     packet_size = struct.calcsize("i3f")
@@ -225,17 +218,17 @@ def receive_camera_objects(
             receiver.nextPacket()
             continue
 
-        object_id, robot_x, robot_y, robot_z = struct.unpack("i3f", packet)
-        is_new_object = object_id not in detected_objects_robot
-        detected_objects_robot[object_id] = np.array(
-            [robot_x, robot_y, robot_z], dtype=float
+        object_id, world_x, world_y, world_z = struct.unpack("i3f", packet)
+        is_new_object = object_id not in detected_objects_world
+        detected_objects_world[object_id] = np.array(
+            [world_x, world_y, world_z], dtype=float
         )
         receiver.nextPacket()
 
         if is_new_object:
             print(
-                f"Camera object {object_id}: robot xyz="
-                f"{detected_objects_robot[object_id].round(4)}"
+                f"Camera object {object_id}: world xyz="
+                f"{detected_objects_world[object_id].round(4)}"
             )
 
 
@@ -245,7 +238,7 @@ target_trajectories = plan_trajectories(joint_targets)
 
 # Motion is advanced by a state machine inside the single Webots step loop.
 # This lets camera packets and future tasks be handled during every movement.
-detected_objects_robot: dict[int, np.ndarray] = {}
+detected_objects_world: dict[int, np.ndarray] = {}
 motion_state = "initializing"
 planned_trajectories = []
 trajectory_index = 0
@@ -258,7 +251,7 @@ validate_joint_positions(HOME_Q)
 print(f"Torque limits (N m): {torque_limits.round(2)}")
 
 while robot.step(timestep) != -1:
-    receive_camera_objects(detected_objects_robot)
+    receive_camera_objects(detected_objects_world)
     current_q = measured_joints()
 
     if previous_q is None:
@@ -327,7 +320,7 @@ while robot.step(timestep) != -1:
             if trajectory_index >= len(planned_trajectories):
                 motion_state = "holding"
                 print(
-                    "All targets completed. Holding final position."
+                    "All three targets completed. Holding final position."
                 )
             else:
                 trajectory_sample_index = 0

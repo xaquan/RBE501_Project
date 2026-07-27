@@ -116,7 +116,7 @@ class FK_Exponential:
         Compute exp(theta * se3) using Rodrigues' formula.
         Optimized by avoiding unnecessary matrix operations.
         """
-        print(f"Computing SE(3) exponential for theta={theta}...")
+        # print(f"Computing SE(3) exponential for theta={theta}...")
         I = sp.eye(3)
         w_skew = se3_matrix[:3, :3]
         v = sp.Matrix(velocity).reshape(3, 1)
@@ -161,7 +161,7 @@ class FK_Exponential:
         rotation_matrices = []
 
         for i in range(self.joint_count):
-            print(f"Multiplying transformation for joint {i}...")
+            # print(f"Multiplying transformation for joint {i}...")
             R = rodrigues_matrices[i]
             T = T * R  # Cumulative product
             M_i = sp.Matrix(self.home_trans_mtx[i])
@@ -259,7 +259,7 @@ class FK_Exponential:
         ) in enumerate(  # pyright: ignore[reportGeneralTypeIssues]
             zip(self.home_omegas, self._velocities)
         ):
-            print(f"Computing Jacobian for joint {i}...")
+            # print(f"Computing Jacobian for joint {i}...")
             rotation = preceding_transform[:3, :3]
             translation = preceding_transform[:3, 3]
 
@@ -294,7 +294,7 @@ class FK_Exponential:
 
     def _compute_joint_jacobian(self, joint_index: int) -> sp.Matrix:
         """Compute Jacobian for a specific joint."""
-        print(f"Computing Jacobian for joint {joint_index}...")
+        # print(f"Computing Jacobian for joint {joint_index}...")
         if self._transformation_matrices is None:
             raise ValueError("Transformation matrices not computed.")
         if not (1 <= joint_index <= self.joint_count):
@@ -405,7 +405,7 @@ class IK_Numerical:
             # Get Jacobian and compute pseudo-inverse
             J = np.array(self.fk.get_jacobian_matrix(), dtype=float)
             Jv = J[:3, :]  # Linear velocity part
-            print(f"Jacobian (linear part) at iteration {iteration}:\n{Jv}")
+            # print(f"Jacobian (linear part) at iteration {iteration}:\n{Jv}")
             Jv_pinv = np.linalg.pinv(Jv)
 
             # Update joint angles

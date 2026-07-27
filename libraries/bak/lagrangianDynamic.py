@@ -5,59 +5,39 @@ from manipulatorKinematics import FK_Exponential
 
 class LagrangeDynamic:
     def __init__(
-        self, thetas, fk: FK_Exponential, fkc: FK_Exponential, masses, gravity
+        self,
+        fk: FK_Exponential,
+        fkc: FK_Exponential,
+        masses,
+        gravity,
+        inertia_array,
     ):
-        self.thetas = sp.Matrix(thetas)
+        # self.thetas = sp.Matrix(thetas)
         self.fk = fk
         self.fkc = fkc
         self.masses = sp.Matrix(masses)
-        self.num_joints = len(thetas)
-        self.qdot = sp.symarray("qdot", self.num_joints + 1)[1:]  # Joint velocities
-        self.qddot = sp.symarray("qddot", self.num_joints + 1)[
-            1:
-        ]  # Joint accelerations
+        # self.num_joints = len(thetas)
+        # self.qdot = sp.symarray("qdot", self.num_joints + 1)[1:]  # Joint velocities
+        # self.qddot = sp.symarray("qddot", self.num_joints + 1)[1:]  # Joint accelerations
         self.g = gravity  # Acceleration due to gravity (m/s^2)
-        self.velocities = (
-            self.__compute_velocities()
-        )  # Compute velocities for each link
-        self.inertia_array = (
-            self.__generate_intertia_matrices()
-        )  # Generate symbolic inertia matrices for each link
-        self.MassPoint_v_squared_all_joints = (
-            self.__compute_massPoint_v_squared_all_joints()
-        )  # Compute kinetic energies of each link
+        self.inertia_array = inertia_array
 
-        self.potential_energies = (
-            self.__compute_potential_energies()
-        )  # Compute potential energies of each link
-        self.Potential_energy_P = (
-            self.__compute_total_potential_energy()
-        )  # Compute total potential energy of the manipulator
 
-        if fkc:
-            self.Jv_mtx, self.Jw_mtx = (
-                self.__compute_jacobian()
-            )  # Compute Jacobian matrices for each link
-            # Dq = self.__compute_Dq()  # Compute D(q) matrix
-            # self.DCG_matrices = [Dq, self.__compute_Cq(Dq), self.__compute_Gq()]  # Compute D(q), C(q, qdot), G(q) matrices
+    def __solving_lagrangian_dynamics(self):
+        self.velocities =  self.__compute_velocities()
+        self.MassPoint_v_squared_all_joints = self.__compute_massPoint_v_squared_all_joints() # Compute kinetic energies of each link
+
+        self.potential_energies = self.__compute_potential_energies() # Compute potential energies of each link
+        self.Potential_energy_P = self.__compute_total_potential_energy() # Compute total potential energy of the manipulator
+
+        if self.fkc:
+            self.Jv_mtx, self.Jw_mtx = self.__compute_jacobian() # Compute Jacobian matrices for each link
         else:
-            self.Jv_mtx = (
-                self.fk.get_jacobian_linear_velocities()
-            )  # Get linear velocities of each link's center of mass
-            self.total_K = (
-                self.__compute_total_massPoint_K()
-            )  # Compute total kinetic energy of the manipulator
-            self.Lagrange = (
-                self.__compute_Lagrange()
-            )  # Compute the Lagrangian of the manipulator
-            self.dL_q, self.dL_qdot, self.dL_qdot_dt = (
-                self.__compute_differential_L()
-            )  # Compute the differential of the Lagrangian with respect to joint angles and joint velocities
-            self.torques = (
-                self.__compute_torques()
-            )  # Compute the torques required at each joint
-            # Dq = self.__compute_Dq()  # Compute D(q) matrix
-            # self.DCG_matrices = self.__get_DCG_matrices()  # Compute D(q), C(q, qdot), G(q) matrices
+            self.Jv_mtx = self.fk.get_jacobian_linear_velocities() # Get linear velocities of each link's center of mass
+            self.total_K = self.__compute_total_massPoint_K()  # Compute total kinetic energy of the manipulator
+            self.Lagrange = self.__compute_Lagrange() # Compute the Lagrangian of the manipulator
+            self.dL_q, self.dL_qdot, self.dL_qdot_dt = self.__compute_differential_L() # Compute the differential of the Lagrangian with respect to joint angles and joint velocities
+            self.torques = self.__compute_torques() # Compute the torques required at each joint
 
         Dq = self.__compute_Dq()  # Compute D(q) matrix
         self.DCG_matrices = [
@@ -66,36 +46,14 @@ class LagrangeDynamic:
             self.__compute_Gq(),
         ]  # Compute D(q), C(q, qdot), G(q) matrices
 
-    def __generate_intertia_matrices(self):
-        """
-        Generate symbolic inertia matrices for each link.
-        """
-        print("Generating inertia matrices...")
-        res = []
-        for i in range(self.num_joints):
-            I = sp.Matrix(
-                [
-                    [
-                        sp.symbols(f"Ixx{i+1}"),
-                        sp.symbols(f"Ixy{i+1}"),
-                        sp.symbols(f"Ixz{i+1}"),
-                    ],
-                    [
-                        sp.symbols(f"Ixy{i+1}"),
-                        sp.symbols(f"Iyy{i+1}"),
-                        sp.symbols(f"Iyz{i+1}"),
-                    ],
-                    [
-                        sp.symbols(f"Ixz{i+1}"),
-                        sp.symbols(f"Iyz{i+1}"),
-                        sp.symbols(f"Izz{i+1}"),
-                    ],
-                ]
-            )
-            res.append(I)
-
-        return res
-
+    def get_DCG_matrices(self, q, qdot, qddot):
+        self.q = sp.Matrix(q)
+        self.num_joints = len(q)
+        self.qdot = sp.Matrix(qdot)
+        self.qddot = sp.Matrix(qddot)
+        self.__solving_lagrangian_dynamics()
+        return self.DCG_matrices
+  
     def __compute_velocities(self):
         """
         Compute the linear and angular velocities of each link's center of mass.
@@ -276,9 +234,9 @@ class LagrangeDynamic:
             for j in range(self.num_joints):
                 for k in range(self.num_joints):
                     Cijk[i, j, k] = (
-                        sp.diff(D[i, j], self.thetas[k])
-                        + sp.diff(D[i, k], self.thetas[j])
-                        - sp.diff(D[j, k], self.thetas[i])
+                        sp.diff(D[i, j], self.q[k])
+                        + sp.diff(D[i, k], self.q[j])
+                        - sp.diff(D[j, k], self.q[i])
                     ) / 2  # pyright: ignore[reportOperatorIssue]
 
         for i in range(self.num_joints):
@@ -296,7 +254,7 @@ class LagrangeDynamic:
         G = sp.zeros(self.num_joints, 1)
         for i in range(self.num_joints):
             G[i] = sp.diff(
-                self.Potential_energy_P, self.thetas[i]
+                self.Potential_energy_P, self.q[i]
             )  # Compute the gravitational forces
         return sp.simplify(G)
 
@@ -353,7 +311,7 @@ class LagrangeDynamic:
         """
         print("Computing differential of Lagrangian...")
         L = self.Lagrange
-        q = sp.Matrix(self.thetas)
+        q = sp.Matrix(self.q)
         qdot = sp.Matrix(self.qdot)
         qddot = sp.Matrix(self.qddot)
 

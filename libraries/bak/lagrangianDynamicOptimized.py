@@ -11,7 +11,7 @@ from typing import Optional
 
 import sympy as sp
 
-from manipulatorKinematicsOptimized import FK_Exponential
+from libraries.bak.manipulatorKinematicsOptimized import FK_Exponential
 
 
 class LagrangeDynamic:
@@ -36,6 +36,7 @@ class LagrangeDynamic:
         fkc: Optional[FK_Exponential],
         masses,
         gravity,
+        inertia_array: Optional[list[sp.Matrix]] = None,
         *,
         simplify_results: bool = True,
     ) -> None:
@@ -56,7 +57,7 @@ class LagrangeDynamic:
         self._qdot_vector = sp.Matrix(self.qdot)
         self._qddot_vector = sp.Matrix(self.qddot)
 
-        self._inertia_array: Optional[list[sp.Matrix]] = None
+        self._inertia_array: Optional[list[sp.Matrix]] = inertia_array
         self._velocities: Optional[list[sp.Matrix]] = None
         self._mass_point_v_squared: Optional[list[sp.Expr]] = None
 
