@@ -6,6 +6,8 @@ syms theta1 theta2 theta3 theta4 theta5 theta6 real
 syms theta1_dot theta2_dot theta3_dot theta4_dot theta5_dot theta6_dot real
 syms theta1_ddot theta2_ddot theta3_ddot theta4_ddot ...
     theta5_ddot theta6_ddot real
+syms box_mass real %mass defined parametrically such that it can be changed
+
 q = [theta1, theta2, theta3, theta4, theta5, theta6];
 
 % UR5e standard DH parameters
@@ -13,6 +15,12 @@ a = [sym(0), sym('-0.425'), sym('-0.3922'), sym(0), sym(0), sym(0)];
 
 d = [sym('0.1625'), sym(0), sym(0), sym('0.1333'), sym('0.0997'),...
     sym('0.0996')];
+
+%box(payload dimensions) - the white or black box in the werobot world
+box_length = sym('0.1');
+box_width = sym('0.1');
+box_height = sym('0.1');
+
 
 % Exact sine and cosine values of the UR5e DH twist angles
 cos_alpha = sym([0, 1, 1, 0, 0, 1]);
@@ -52,6 +60,7 @@ rc3 = [sym('0.15'); sym(0); sym('0.0265'); sym(1)];
 rc4 = [sym(0); sym('-0.0018'); sym('0.01634'); sym(1)];
 rc5 = [sym(0); sym('0.0018'); sym('0.01634'); sym(1)];
 rc6 = [sym(0); sym(0); sym('-0.001159'); sym(1)];
+rc_box = [sym(0); sym(0); sym('-0.05'); sym(1)];
 
 %representing the CoMs in the base frame
 pc1_h = simplify(T01*rc1);
@@ -60,6 +69,7 @@ pc3_h = simplify(T03*rc3);
 pc4_h = simplify(T04*rc4);
 pc5_h = simplify(T05*rc5);
 pc6_h = simplify(T06*rc6);
+pc_box_h = simplify(T06*rc_box);
 
 pc1 = pc1_h(1:3);
 pc2 = pc2_h(1:3);
@@ -67,6 +77,7 @@ pc3 = pc3_h(1:3);
 pc4 = pc4_h(1:3);
 pc5 = pc5_h(1:3);
 pc6 = pc6_h(1:3);
+pc_box = pc_box_h(1:3);
 
 q_dot = [theta1_dot; theta2_dot; theta3_dot; theta4_dot; theta5_dot; ...
     theta6_dot];
@@ -81,6 +92,7 @@ Jv3 = simplify(jacobian(pc3, q), 'Steps', 10);
 Jv4 = simplify(jacobian(pc4, q), 'Steps', 10);
 Jv5 = simplify(jacobian(pc5, q), 'Steps', 10);
 Jv6 = simplify(jacobian(pc6, q), 'Steps', 10);
+Jv_box = simplify(jacobian(pc_box, q), 'Steps', 10);
 
 vc1 = simplify(Jv1*q_dot, 'Steps', 10);
 vc2 = simplify(Jv2*q_dot, 'Steps', 10);
@@ -88,6 +100,7 @@ vc3 = simplify(Jv3*q_dot, 'Steps', 10);
 vc4 = simplify(Jv4*q_dot, 'Steps', 10);
 vc5 = simplify(Jv5*q_dot, 'Steps', 10);
 vc6 = simplify(Jv6*q_dot, 'Steps', 10);
+%vc_box = simplify(Jv_box*q_dot, 'Steps', 10);
 
 z0 = sym([0; 0; 1]);
 z1 = simplify(T01(1:3,3), 'Steps', 10);
@@ -104,6 +117,7 @@ Jw3 = [z0, z1, z2, zero3, zero3, zero3];
 Jw4 = [z0, z1, z2, z3, zero3, zero3];
 Jw5 = [z0, z1, z2, z3, z4, zero3];
 Jw6 = [z0, z1, z2, z3, z4, z5];
+Jw_box = Jw6;
 
 Jw1 = simplify(Jw1, 'Steps', 10);
 Jw2 = simplify(Jw2, 'Steps', 10);
@@ -118,6 +132,7 @@ omega3 = simplify(Jw3*q_dot, 'Steps', 10);
 omega4 = simplify(Jw4*q_dot, 'Steps', 10);
 omega5 = simplify(Jw5*q_dot, 'Steps', 10);
 omega6 = simplify(Jw6*q_dot, 'Steps', 10);
+%omega_box = omega6;
 
 %Link Masses and gravity
 m1 = sym('3.761');
@@ -139,6 +154,7 @@ I4 = zeros(3,3);
 I5 = zeros(3,3);
 I6 = zeros(3,3);
 I6(3,3) = 0.0002;
+I_box = (box_mass/600) * sym(eye(3));
 
 R01 = T01(1:3,1:3);
 R02 = T02(1:3,1:3);
@@ -153,6 +169,7 @@ I03 = simplify(R03*I3*R03.', 'Steps', 10);
 I04 = simplify(R04*I4*R04.', 'Steps', 10);
 I05 = simplify(R05*I5*R05.', 'Steps', 10);
 I06 = simplify(R06*I6*R06.', 'Steps', 10);
+I0_box = simplify(R06 * I_box * R06.', 'Steps', 10);
 
 %Linear Kinetic Energy
 Kv1 = (sym(1)/2)*m1*(vc1.'*vc1);
@@ -161,6 +178,8 @@ Kv3 = (sym(1)/2)*m3*(vc3.'*vc3);
 Kv4 = (sym(1)/2)*m4*(vc4.'*vc4);
 Kv5 = (sym(1)/2)*m5*(vc5.'*vc5);
 Kv6 = (sym(1)/2)*m6*(vc6.'*vc6);
+%Kv_box = (sym(1)/2)*box_mass*(vc_box.'*vc_box);
+%Kv_box = simplify(Kv_box, 'Steps', 5);
 
 %Rotational Kinetic Energy
 Kw1 = simplify((1/2)*(omega1.'*I01*omega1), 'Steps', 10);
@@ -168,7 +187,8 @@ Kw2 = simplify((1/2)*(omega2.'*I02*omega2), 'Steps', 10);
 Kw3 = simplify((1/2)*(omega3.'*I03*omega3), 'Steps', 10);
 Kw4 = simplify((1/2)*(omega4.'*I04*omega4), 'Steps', 10);
 Kw5 = simplify((1/2)*(omega5.'*I05*omega5), 'Steps', 10);
-Kw6 = (sym(1)/2)*(omega6.'*I06*omega6);
+Kw6 = simplify((sym(1)/2)*(omega6.'*I06*omega6), 'Steps', 10);
+%Kw_box = simplify((sym(1)/2)*(omega_box.'*I0_box*omega_box), 'Steps', 10);
 
 %Total Kinetic Energy of Each Link
 K1 = Kv1 + Kw1;
@@ -177,6 +197,7 @@ K3 = Kv3 + Kw3;
 K4 = Kv4 + Kw4;
 K5 = Kv5 + Kw5;
 K6 = Kv6 + Kw6;
+%K_box = Kv_box + Kw_box;
 
 % Total Kinetic Energy
 K_total = simplify(K1 + K2 + K3 + K4 + K5 + K6, 'Steps', 10);
@@ -188,6 +209,7 @@ P3 = simplify(-m3*g0.'*pc3, 'Steps', 10);
 P4 = simplify(-m4*g0.'*pc4, 'Steps', 10);
 P5 = simplify(-m5*g0.'*pc5, 'Steps', 10);
 P6 = simplify(-m6*g0.'*pc6, 'Steps', 10);
+P_box = simplify(-box_mass*g0.' * pc_box, 'Steps', 10);
 
 % Total Potential Energy
 P_total = simplify(P1 + P2 + P3 + P4 + P5 + P6, ...
@@ -195,24 +217,33 @@ P_total = simplify(P1 + P2 + P3 + P4 + P5 + P6, ...
 
 % Lagrangian
 L = simplify(K_total - P_total, 'Steps', 10);
+%L_box = K_box - P_box;
 
 q_col = q.';
 
 %Euler-lagrange Equations
 dL_dqdot = jacobian(L, q_dot).';
 dL_dq = jacobian(L, q_col).';
+%dLbox_dqdot = jacobian(L_box, q_dot).';
+%dLbox_dq = jacobian(L_box, q_col).';
 
 d_dt_dL_dqdot = jacobian(dL_dqdot, q_col)*q_dot + ...
     jacobian(dL_dqdot, q_dot)*q_ddot;
+%d_dt_dLbox_dqdot = jacobian(dLbox_dqdot, q_col) * q_dot + ...
+%    jacobian(dLbox_dqdot, q_dot) * q_ddot;
 
-tau = simplify(d_dt_dL_dqdot - dL_dq, 'Steps', 100);
+tau = simplify(d_dt_dL_dqdot - dL_dq, 'Steps', 50);
+%tau_box = simplify(d_dt_dLbox_dqdot - dLbox_dq, 'Steps', 10);
+
 
 %Compact dynamic model
 M = simplify(jacobian(tau, q_ddot), 'Steps', 50);
 G = simplify(jacobian(P_total, q_col).', 'Steps', 50);
 
-%% Coriolis matrix using Christoffel coefficients
+M_box = box_mass *(Jv_box.' * Jv_box) + Jw_box.'*I0_box*Jw_box;
+G_box = jacobian(P_box, q_col).';
 
+%% Coriolis matrix using Christoffel coefficients
 C = sym(zeros(6,6));
 
 for i = 1:6
@@ -234,17 +265,34 @@ for i = 1:6
     end
 end
 
+C_box = sym(zeros(6,6));
+
+for i = 1:6
+    for j = 1:6
+
+        Cij_box = sym(0);
+
+        for k = 1:6
+            Cijk_box = (sym(1)/2)*(diff(M_box(i,j), q_col(k)) + ...
+                diff(M_box(i,k), q_col(j)) - ...
+                diff(M_box(j,k), q_col(i)) );
+            
+            Cij_box = Cij_box + Cijk_box*q_dot(k);
+        end
+
+        C_box(i,j) = simplify(Cij_box, 'Steps', 10);
+    end
+end
+
 Cqdot = simplify(C*q_dot, 'Steps', 10);
+
+Cqdot_box = simplify(C_box*q_dot, 'Steps', 10);
 
 M_display = simplify(vpa(M,6));
 Cqdot_display = simplify(vpa(Cqdot, 6));
 G_display = simplify(vpa(G,6));
 
-% Numerical evaluation at home position
-%The objective of this and non-zero test below is to validate the dynamical model
-%If the M and M-2C matrices are seen to be skew symmetric, this will provide some
-%First level validation of the dynamical model
-
+%% Numerical evaluation at home
 
 q_home = zeros(6,1);
 qdot_home = zeros(6,1);
@@ -257,7 +305,20 @@ C_home = double(subs(C, ...
 
 G_home = double(subs(G, q_col, q_home));
 
-% Non-zerotest
+M_box_zero = simplify(subs(M_box, box_mass, 0));
+C_box_zero = simplify(subs(C_box, box_mass, 0));
+G_box_zero = simplify(subs(G_box, box_mass, 0));
+
+disp('M_box at zero mass:')
+disp(M_box_zero)
+
+disp('C_box at zero mass:')
+disp(C_box_zero)
+
+disp('G_box at zero mass:')
+disp(G_box_zero)
+
+%% Step 4 - Nonzero numerical validation
 
 q_test = [
      0.2;
@@ -314,8 +375,44 @@ matlabFunction( ...
     'Vars', {q_col}, ...
     'Optimize', true);
 
-%% Test generated numerical functions
+%% Validate payload compact model
 
-M_generated = UR5e_M(q_test);
-C_generated = UR5e_C(q_test, qdot_test);
-G_generated = UR5e_G(q_test);
+box_mass_test = 1.0;
+
+M_box_test = double(subs( ...
+    M_box, ...
+    [q_col; box_mass], ...
+    [q_test; box_mass_test]));
+
+C_box_test = double(subs( ...
+    C_box, ...
+    [q_col; q_dot; box_mass], ...
+    [q_test; qdot_test; box_mass_test]));
+
+G_box_test = double(subs( ...
+    G_box, ...
+    [q_col; box_mass], ...
+    [q_test; box_mass_test]));
+
+tau_box_compact_test = ...
+    M_box_test*qddot_test + ...
+    C_box_test*qdot_test + ...
+    G_box_test;
+
+matlabFunction( ...
+    M_box, ...
+    'File', 'UR5e_payload_M', ...
+    'Vars', {q_col, box_mass}, ...
+    'Optimize', true);
+
+matlabFunction( ...
+    C_box, ...
+    'File', 'UR5e_payload_C', ...
+    'Vars', {q_col, q_dot, box_mass}, ...
+    'Optimize', true);
+
+matlabFunction( ...
+    G_box, ...
+    'File', 'UR5e_payload_G', ...
+    'Vars', {q_col, box_mass}, ...
+    'Optimize', true);

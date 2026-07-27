@@ -16,6 +16,7 @@ def ur5e_C(q: ArrayLike, q_dot: ArrayLike) -> NDArray[np.float64]:
     if qd_arr.size != 6:
         raise ValueError(f"q_dot must contain exactly 6 values; received {qd_arr.size}.")
 
+    theta1 = q_arr[0]
     theta2 = q_arr[1]
     theta3 = q_arr[2]
     theta4 = q_arr[3]
