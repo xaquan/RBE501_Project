@@ -54,7 +54,8 @@ BENCHMARK_DROP = np.array([0.366269, 0.555773, 0.05], dtype=float)
 BENCHMARK_PAYLOADS = (0.0, 0.5, 1.0)
 PHYSICAL_ZERO_MASS = 1e-6
 PLACE_DURATION = 1.0
-RELEASE_SETTLE_TIME = 0.5
+PLACE_TARGET_TIMEOUT = 0.75
+RELEASE_SETTLE_TIME = 0.15
 PAYLOAD_MOTION_STATES = {
     "lift",
     "carry_to_drop",
@@ -190,7 +191,9 @@ def solve_object_joints(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return a downward-facing joint target for one camera object pose."""
     target = np.asarray(object_position, dtype=float) + offset
-    kinematics, inverse_kinematics = create_webots_ur5e_kinematics(initial_guess)
+    kinematics, inverse_kinematics = create_webots_ur5e_kinematics(
+        initial_guess, compute_joint_jacobians=False
+    )
     del inverse_kinematics
     q_target = np.asarray(initial_guess, dtype=float).reshape(6).copy()
 
@@ -546,11 +549,12 @@ while robot.step(timestep) != -1:
 
         if trajectory_sample_index >= trajectory.time.size:
             motion_state = "settling"
-            timeout = (
-                LIFT_TARGET_TIMEOUT
-                if active_motion in PAYLOAD_MOTION_STATES
-                else TARGET_TIMEOUT
-            )
+            if active_motion == "place_descend":
+                timeout = PLACE_TARGET_TIMEOUT
+            elif active_motion in PAYLOAD_MOTION_STATES:
+                timeout = LIFT_TARGET_TIMEOUT
+            else:
+                timeout = TARGET_TIMEOUT
             target_deadline = robot.getTime() + timeout
 
     elif motion_state == "settling":
@@ -883,7 +887,6 @@ while robot.step(timestep) != -1:
                 "approach",
             )
         except (RuntimeError, ValueError) as error:
-            # Wait for a new camera reading.
             visited_object_positions[object_id] = object_position.copy()
             print(f"Skipping camera object {object_id}: {error}")
             continue

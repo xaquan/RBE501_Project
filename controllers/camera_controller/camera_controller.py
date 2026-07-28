@@ -96,10 +96,6 @@ while robot.step(timestep) != -1:
         message = struct.pack('i3f', obj_id, robot_x, robot_y, robot_z)
         emitter.send(message)
         last_sent_positions[obj_id] = robot_position
-        print(
-            f"Object {obj_id} changed: "
-            f"robot xyz=({robot_x:.3f}, {robot_y:.3f}, {robot_z:.3f})"
-        )
 
     # If an object leaves the image, forget its old position. It will be sent
     # as a new detection if it becomes visible again.
