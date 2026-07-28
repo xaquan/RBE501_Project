@@ -47,8 +47,39 @@ UR5e {
   controller "robot_controller"
   toolSlot [
     VacuumGripper {
+      name "vacuum_gripper"
       translation 0 0.025 0
       rotation 1 0 0 -1.5707953071795862
+      contactPoints 1
+      children [
+        # Suction-cup collision geometry.
+        Pose {
+          translation 0 0 0.01
+          rotation 1 0 0 1.5707963267948966
+          children [
+            Shape {
+              appearance PBRAppearance {
+                baseColor 0.08 0.08 0.08
+                roughness 0.7
+              }
+              geometry Cylinder {
+                radius 0.03
+                height 0.02
+              }
+            }
+          ]
+        }
+      ]
+      boundingObject Pose {
+        translation 0 0 0.01
+        rotation 1 0 0 1.5707963267948966
+        children [
+          Cylinder {
+            radius 0.03
+            height 0.02
+          }
+        ]
+      }
       physics Physics {
         mass 0.1
         centerOfMass [

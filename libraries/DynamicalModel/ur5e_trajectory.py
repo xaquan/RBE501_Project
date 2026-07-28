@@ -11,7 +11,7 @@ from numpy.typing import ArrayLike, NDArray
 
 try:
     from ..lagrangianDynamicReal import LagrangeDynamicReal
-    from ..manipulatorKinematics import FK_Exponential
+    from ..ManipulatorKinematics import FK_Exponential
 except ImportError:  # Allow this file to be run directly.
     import sys
 
@@ -75,9 +75,14 @@ def _joint_vector(values: ArrayLike, name: str) -> FloatArray:
     return vector
 
 
-@lru_cache(maxsize=1)
-def create_ur5e_real_dynamics() -> LagrangeDynamicReal:
-    """Create the numerical UR5e Lagrangian model once per process."""
+@lru_cache(maxsize=None)
+def create_ur5e_real_dynamics(
+    carried_payload_mass: float = 0.0,
+) -> LagrangeDynamicReal:
+    """Create a numerical UR5e model for a specified carried payload."""
+    carried_payload_mass = float(carried_payload_mass)
+    if not np.isfinite(carried_payload_mass) or carried_payload_mass < 0.0:
+        raise ValueError("carried_payload_mass must be finite and non-negative.")
     d1 = 0.163
     d2 = 0.138
     a2 = 0.425
@@ -96,13 +101,16 @@ def create_ur5e_real_dynamics() -> LagrangeDynamicReal:
     wrist_3_mass = 0.365
     wrist_3_c6y = 0.071
 
-    # The project world attaches this fixed VacuumGripper to toolSlot.
-    payload_mass = 0.100
+    # Fixed gripper attached to toolSlot.
+    gripper_mass = 0.100
     payload_c6y = 0.125
-    combined_wrist_3_mass = wrist_3_mass + payload_mass
+    # Treat the carried object as an additional wrist payload.
+    combined_wrist_3_mass = (
+        wrist_3_mass + gripper_mass + carried_payload_mass
+    )
     c6y = (
         wrist_3_mass * wrist_3_c6y
-        + payload_mass * payload_c6y
+        + (gripper_mass + carried_payload_mass) * payload_c6y
     ) / combined_wrist_3_mass
 
     link_transforms = [
@@ -259,12 +267,13 @@ def inverse_dynamics(
     position: ArrayLike,
     velocity: ArrayLike,
     acceleration: ArrayLike,
+    carried_payload_mass: float = 0.0,
 ) -> FloatArray:
     """Return torque from the real-valued Lagrangian dynamics model."""
     q_value = _joint_vector(position, "position")
     qdot_value = _joint_vector(velocity, "velocity")
     qddot_value = _joint_vector(acceleration, "acceleration")
-    return create_ur5e_real_dynamics().get_torque(
+    return create_ur5e_real_dynamics(carried_payload_mass).get_torque(
         q_value, qdot_value, qddot_value
     )
 
@@ -274,6 +283,7 @@ def quintic_trajectory(
     goal: ArrayLike,
     duration: float,
     sample_period: float,
+    carried_payload_mass: float = 0.0,
 ) -> Trajectory:
     """Generate a rest-to-rest quintic joint trajectory.
 
@@ -316,7 +326,12 @@ def quintic_trajectory(
     acceleration = np.outer(blend_ddot, displacement)
     torque = np.vstack(
         [
-            inverse_dynamics(q_value, qdot_value, qddot_value)
+            inverse_dynamics(
+                q_value,
+                qdot_value,
+                qddot_value,
+                carried_payload_mass=carried_payload_mass,
+            )
             for q_value, qdot_value, qddot_value in zip(
                 position, velocity, acceleration
             )
