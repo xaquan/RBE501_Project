@@ -36,8 +36,8 @@ OBJECT_GRASP_OFFSET = np.array([0.0, 0.0, 0.070], dtype=float)
 OBJECT_REVISIT_DISTANCE = 0.01
 OBJECT_REPLAN_DISTANCE = 0.02
 GRASP_TIMEOUT = 1.0
-LIFT_TARGET_TIMEOUT = 6.0
-LIFT_JOINT_TOLERANCE = np.deg2rad(1.5)
+LIFT_TARGET_TIMEOUT = 10.0
+LIFT_JOINT_TOLERANCE = np.deg2rad(2.5)
 # False: normal two-block run. True: 0 / 0.5 / 1 kg benchmark.
 RUN_SEQUENTIAL_PAYLOAD_BENCHMARK = False
 NORMAL_OBJECTS = (
@@ -45,7 +45,7 @@ NORMAL_OBJECTS = (
     (np.array([0.730, 0.4600, 0.0498]), 0.5),
 )
 NORMAL_DROP_CENTERS = np.array(
-    [[0.366269, 0.555773, 0.05], [0.700, -0.100, 0.05]],
+    [[0.366269, 0.555773, 0.05], [0.600, -0.200, 0.05]],
     dtype=float,
 )
 # Webots needs a positive mass; the model still uses 0 kg exactly.
@@ -53,7 +53,7 @@ BENCHMARK_SOURCE = np.array([0.500, -0.4995, 0.0496], dtype=float)
 BENCHMARK_DROP = np.array([0.366269, 0.555773, 0.05], dtype=float)
 BENCHMARK_PAYLOADS = (0.0, 0.5, 1.0)
 PHYSICAL_ZERO_MASS = 1e-6
-PLACE_DURATION = 2.0
+PLACE_DURATION = 1.0
 RELEASE_SETTLE_TIME = 0.5
 PAYLOAD_MOTION_STATES = {
     "lift",
@@ -69,7 +69,7 @@ DOWNWARD_TOOL_ROTATION = np.array(
     dtype=float,
 )
 
-TRAJECTORY_DURATION = 3.5
+TRAJECTORY_DURATION = 1.5
 TARGET_TIMEOUT = 3.0
 JOINT_TOLERANCE = np.deg2rad(0.5)
 IK_TOLERANCE = 1e-5
@@ -744,7 +744,12 @@ while robot.step(timestep) != -1:
                     "checking vacuum attachment."
                 )
             else:
-                raise RuntimeError("A trajectory endpoint was not reached in time.")
+                position_error = np.rad2deg(np.max(np.abs(current_q - final_q)))
+                raise RuntimeError(
+                    f"{active_motion} did not settle within "
+                    f"{LIFT_TARGET_TIMEOUT if active_motion in PAYLOAD_MOTION_STATES else TARGET_TIMEOUT:.1f} s "
+                    f"(max joint error {position_error:.2f} deg)."
+                )
 
     elif motion_state == "verifying_grasp":
         command_torques(
