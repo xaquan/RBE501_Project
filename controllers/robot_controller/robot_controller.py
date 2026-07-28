@@ -4,11 +4,11 @@ from pathlib import Path
 import struct
 import sys
 
-from controller import Robot
+from controller import Supervisor
 import numpy as np
 
 
-# Make the project-level libraries importable from the Webots controller.
+# Project libraries.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -26,36 +26,44 @@ JOINT_NAMES = [
     "wrist_3_joint",
 ]
 
-# Standard UR5e home configuration, in radians.
+# Home joint angles (rad).
 HOME_Q = np.deg2rad([0.0, -90.0, 90.0, -90.0, -90.0, 0.0])
 
-# Camera positions refer to object centres.
+# Camera reports block centres.
 OBJECT_APPROACH_OFFSET = np.array([0.0, 0.0, 0.20], dtype=float)
-# Tool height for cup contact with the 0.1 m boxes.
+# Cup contact height for 0.1 m blocks.
 OBJECT_GRASP_OFFSET = np.array([0.0, 0.0, 0.070], dtype=float)
 OBJECT_REVISIT_DISTANCE = 0.01
 OBJECT_REPLAN_DISTANCE = 0.02
 GRASP_TIMEOUT = 1.0
 LIFT_TARGET_TIMEOUT = 6.0
 LIFT_JOINT_TOLERANCE = np.deg2rad(1.5)
-# Initial box centres and masses; recognition IDs vary between runs.
-KNOWN_OBJECTS = (
+# False: normal two-block run. True: 0 / 0.5 / 1 kg benchmark.
+RUN_SEQUENTIAL_PAYLOAD_BENCHMARK = False
+NORMAL_OBJECTS = (
     (np.array([0.500, -0.4995, 0.0496]), 1.0),
     (np.array([0.730, 0.4600, 0.0498]), 0.5),
 )
-# Tabletop drop locations.
-DROP_OBJECT_CENTERS = np.array(
-    [[0.366269, 0.555773, 0.05], [0.470301, -0.280796, 0.05]],
+NORMAL_DROP_CENTERS = np.array(
+    [[0.366269, 0.555773, 0.05], [0.700, -0.100, 0.05]],
     dtype=float,
 )
-PLACE_DURATION = 4.0
+# Webots needs a positive mass; the model still uses 0 kg exactly.
+BENCHMARK_SOURCE = np.array([0.500, -0.4995, 0.0496], dtype=float)
+BENCHMARK_DROP = np.array([0.366269, 0.555773, 0.05], dtype=float)
+BENCHMARK_PAYLOADS = (0.0, 0.5, 1.0)
+PHYSICAL_ZERO_MASS = 1e-6
+PLACE_DURATION = 2.0
 RELEASE_SETTLE_TIME = 0.5
-PAYLOAD_MOTION_STATES = {"lift", "carry_to_drop", "place_descend"}
+PAYLOAD_MOTION_STATES = {
+    "lift",
+    "carry_to_drop",
+    "place_descend",
+}
 IK_MAX_ITERATIONS = 400
 IK_STEP_SIZE = 0.30
 IK_DAMPING = 1e-3
 
-# Tool orientation that keeps the cup facing down.
 DOWNWARD_TOOL_ROTATION = np.array(
     [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],
     dtype=float,
@@ -67,13 +75,13 @@ JOINT_TOLERANCE = np.deg2rad(0.5)
 IK_TOLERANCE = 1e-5
 VELOCITY_FILTER = 0.25
 
-# Fixed positive torque-feedback gains. LagrangeDynamicReal supplies the
-# inverse-dynamics feed-forward torque; these gains correct tracking error.
+# PD tracking gains for the inverse-dynamics torque.
 KP_TORQUE = np.array([80.0, 100.0, 70.0, 15.0, 10.0, 5.0])
 KD_TORQUE = np.array([12.0, 15.0, 10.0, 2.5, 1.5, 0.8])
+SIMULATION_TORQUE_LOG = PROJECT_ROOT / "torque_logs" / "simulation_command_torque.csv"
 
 
-robot = Robot()
+robot = Supervisor()
 timestep = int(robot.getBasicTimeStep())
 sample_period = timestep / 1000.0
 
@@ -89,6 +97,18 @@ if gripper is None:
 gripper.enablePresence(timestep)
 gripper.turnOff()
 
+benchmark_box = robot.getFromDef("box1")
+if benchmark_box is None:
+    raise RuntimeError('Cannot find benchmark block DEF "box1".')
+benchmark_translation = benchmark_box.getField("translation")
+benchmark_rotation = benchmark_box.getField("rotation")
+benchmark_physics = benchmark_box.getField("physics").getSFNode()
+benchmark_mass = benchmark_physics.getField("mass")
+normal_second_box = robot.getFromDef("box2")
+if normal_second_box is None:
+    raise RuntimeError('Cannot find normal-scene block DEF "box2".')
+normal_second_translation = normal_second_box.getField("translation")
+
 motors = []
 sensors = []
 for joint_name in JOINT_NAMES:
@@ -98,7 +118,7 @@ for joint_name in JOINT_NAMES:
         raise RuntimeError(f'Cannot find devices for joint "{joint_name}".')
 
     sensor.enable(timestep)
-    motor.setTorque(0.0)  # Disable Webots PID and enter direct torque mode.
+    motor.setTorque(0.0)  # Direct torque control.
     motors.append(motor)
     sensors.append(sensor)
 
@@ -155,6 +175,8 @@ def command_torques(
         requested_torque, -torque_limits, torque_limits
     )
 
+    log_simulation_torque(robot.getTime(), safe_torque)
+
     for motor, torque in zip(motors, safe_torque):
         motor.setTorque(float(torque))
 
@@ -204,7 +226,7 @@ def solve_object_joints(
         delta_q = IK_STEP_SIZE * jacobian.T @ np.linalg.solve(
             damped_system, pose_error
         )
-        # Keep each IK update bounded.
+        # Limit each IK step.
         q_target += np.clip(delta_q, -0.15, 0.15)
     else:
         raise ValueError(
@@ -267,21 +289,38 @@ def next_unvisited_object(
     return None
 
 
-def payload_mass_for_camera_object(object_position: np.ndarray) -> float:
-    """Return the configured mass of the nearest original scene object."""
-    position = np.asarray(object_position, dtype=float)
-    reference_position, mass = min(
-        KNOWN_OBJECTS,
-        key=lambda item: np.linalg.norm(position - item[0]),
+def reset_benchmark_block(payload_mass: float) -> None:
+    """Put the single benchmark block back at the common source pose."""
+    physical_mass = max(payload_mass, PHYSICAL_ZERO_MASS)
+    benchmark_mass.setSFFloat(physical_mass)
+    benchmark_translation.setSFVec3f(BENCHMARK_SOURCE.tolist())
+    benchmark_rotation.setSFRotation([0.0, 0.0, 1.0, 0.0])
+    benchmark_box.resetPhysics()
+    print(
+        f"Reset scene for {payload_mass:.1f} kg payload "
+        f"(Webots block mass {physical_mass:g} kg)."
     )
-    distance = np.linalg.norm(position - reference_position)
-    if distance > 0.20:
-        print(
-            f"No mass reference within 0.20 m of {position.round(3)}; "
-            "using 0.5 kg."
-        )
+
+
+def normal_payload_mass(object_position: np.ndarray) -> float:
+    """Return the configured mass for either normal-scene block."""
+    reference, mass = min(
+        NORMAL_OBJECTS,
+        key=lambda item: np.linalg.norm(object_position - item[0]),
+    )
+    if np.linalg.norm(object_position - reference) > 0.20:
         return 0.5
     return mass
+
+
+def configure_scene_mode() -> None:
+    """Show the normal pair or prepare the single-block benchmark."""
+    if RUN_SEQUENTIAL_PAYLOAD_BENCHMARK:
+        reset_benchmark_block(BENCHMARK_PAYLOADS[0])
+        normal_second_translation.setSFVec3f([0.0, 0.0, -1.0])
+    else:
+        benchmark_mass.setSFFloat(1.0)
+        normal_second_translation.setSFVec3f(NORMAL_OBJECTS[1][0].tolist())
 
 
 def plan_payload_motion(
@@ -291,12 +330,27 @@ def plan_payload_motion(
     duration: float = TRAJECTORY_DURATION,
 ):
     """Create a trajectory that includes the attached object's dynamics."""
-    return quintic_trajectory(
+    trajectory = quintic_trajectory(
         start=current_q,
         goal=goal_q,
         duration=duration,
         sample_period=sample_period,
         carried_payload_mass=payload_mass,
+    )
+    return trajectory
+
+
+def plan_drop_approach(current_q: np.ndarray):
+    """Plan the loaded move from the current pose to the active drop point."""
+    drop_approach_q, _ = solve_object_joints(
+        active_object_id,
+        active_drop_position,
+        current_q,
+        OBJECT_APPROACH_OFFSET,
+        "drop approach",
+    )
+    return plan_payload_motion(
+        current_q, drop_approach_q, active_payload_mass
     )
 
 
@@ -310,15 +364,23 @@ def plan_empty_hold(current_q: np.ndarray):
     )
 
 
+def log_simulation_torque(time: float, torque: np.ndarray) -> None:
+    """Append the torque command applied during one Webots step."""
+    if not RUN_SEQUENTIAL_PAYLOAD_BENCHMARK or benchmark_run < 0:
+        return
+    with SIMULATION_TORQUE_LOG.open("a", encoding="utf-8") as log_file:
+        values = ",".join(f"{value:.12g}" for value in np.abs(torque))
+        phase = active_motion if active_motion is not None else "startup"
+        log_file.write(
+            f"{time:.12g},{benchmark_run},{phase},"
+            f"{active_payload_mass:.12g},{values}\n"
+        )
+
+
 def receive_camera_objects(
     detected_objects_robot: dict[int, np.ndarray],
 ) -> None:
-    """Decode packets and retain each position in the robot base frame.
-
-    The camera controller performs the camera-to-robot conversion before
-    packing ``(object_id, robot_x, robot_y, robot_z)``. Therefore, these
-    received coordinates must not be transformed again here.
-    """
+    """Read camera packets already expressed in the robot base frame."""
     packet_size = struct.calcsize("i3f")
 
     while receiver.getQueueLength() > 0:
@@ -349,7 +411,6 @@ def receive_camera_objects(
 detected_objects_robot: dict[int, np.ndarray] = {}
 visited_object_positions: dict[int, np.ndarray] = {}
 completed_object_ids: set[int] = set()
-# Per-object state for the shuttle cycle.
 object_home_positions: dict[int, np.ndarray] = {}
 object_payload_masses: dict[int, float] = {}
 object_at_drop: dict[int, bool] = {}
@@ -368,12 +429,23 @@ grasp_deadline = 0.0
 release_deadline = 0.0
 picked_object_id = None
 next_drop_index = 0
+benchmark_payload_index = 0
+benchmark_run = -1
 hold_q = HOME_Q.copy()
 hold_torque = np.zeros(6)
 previous_q = None
 filtered_qdot = np.zeros(6)
 
+if RUN_SEQUENTIAL_PAYLOAD_BENCHMARK:
+    SIMULATION_TORQUE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    SIMULATION_TORQUE_LOG.write_text(
+        "time,run,phase,payload_mass,tau1_cmd,tau2_cmd,tau3_cmd,"
+        "tau4_cmd,tau5_cmd,tau6_cmd\n",
+        encoding="utf-8",
+    )
+
 validate_joint_positions(HOME_Q)
+configure_scene_mode()
 print(f"Torque limits (N m): {torque_limits.round(2)}")
 
 while robot.step(timestep) != -1:
@@ -391,7 +463,7 @@ while robot.step(timestep) != -1:
         current_qdot = filtered_qdot
     previous_q = current_q.copy()
 
-    # Refresh a target that moves during the approach.
+    # Replan if the target moves.
     if (
         active_motion == "approach"
         and active_object_id is not None
@@ -432,7 +504,7 @@ while robot.step(timestep) != -1:
             continue
 
     if motion_state == "initializing":
-        # Sensors are valid after the first step.
+        # Sensors are valid after one step.
         home_trajectory = quintic_trajectory(
             start=current_q,
             goal=HOME_Q,
@@ -449,7 +521,7 @@ while robot.step(timestep) != -1:
         if trajectory is None:
             raise RuntimeError("No active trajectory is available to execute.")
 
-        # One trajectory sample per simulation step.
+        # Advance one trajectory sample per step.
         command_torques(
             desired_q=trajectory.position[trajectory_sample_index],
             desired_qdot=trajectory.velocity[trajectory_sample_index],
@@ -458,7 +530,7 @@ while robot.step(timestep) != -1:
             measured_qdot=current_qdot,
         )
 
-        # Lift as soon as the vacuum link is created.
+        # Lift as soon as the vacuum attaches.
         if active_motion == "descend" and gripper.getPresence():
             if active_approach_q is None:
                 raise RuntimeError("No approach pose is available for lifting.")
@@ -487,7 +559,7 @@ while robot.step(timestep) != -1:
             raise RuntimeError("No active trajectory is available to settle.")
         final_q = trajectory.position[-1]
 
-        # Hold the final sample while the joints settle.
+        # Hold the final command while settling.
         command_torques(
             desired_q=final_q,
             desired_qdot=np.zeros(6),
@@ -523,8 +595,14 @@ while robot.step(timestep) != -1:
                 active_motion = None
                 motion_state = "waiting_for_object"
 
+            elif active_motion == "benchmark_reset":
+                print("Robot reset; waiting for the next benchmark detection.")
+                active_trajectory = None
+                active_motion = None
+                motion_state = "waiting_for_object"
+
             elif active_motion == "approach":
-                # Enable suction before the contact move.
+                # Enable suction before descending.
                 gripper.turnOn()
                 try:
                     grasp_q, _ = solve_object_joints(
@@ -572,41 +650,32 @@ while robot.step(timestep) != -1:
                 )
                 picked_object_id = active_object_id
                 print(f"Picked up camera object {picked_object_id}.")
-                active_returning_home = bool(
-                    object_home_positions.get(active_object_id) is not None
-                    and active_object_id in object_home_positions
-                    and object_at_drop.get(active_object_id, False)
-                )
-                if active_returning_home:
-                    active_drop_position = object_home_positions[
-                        active_object_id
-                    ].copy()
+                if RUN_SEQUENTIAL_PAYLOAD_BENCHMARK:
+                    active_drop_position = BENCHMARK_DROP.copy()
                 else:
-                    active_drop_position = DROP_OBJECT_CENTERS[
-                        next_drop_index % len(DROP_OBJECT_CENTERS)
-                    ].copy()
-                try:
-                    drop_approach_q, _ = solve_object_joints(
-                        active_object_id,
-                        active_drop_position,
-                        current_q,
-                        OBJECT_APPROACH_OFFSET,
-                        "drop approach",
+                    active_returning_home = object_at_drop.get(
+                        active_object_id, False
                     )
+                    if active_returning_home:
+                        active_drop_position = object_home_positions[
+                            active_object_id
+                        ].copy()
+                    else:
+                        active_drop_position = NORMAL_DROP_CENTERS[
+                            next_drop_index % len(NORMAL_DROP_CENTERS)
+                        ].copy()
+                try:
+                    active_trajectory = plan_drop_approach(current_q)
                 except (RuntimeError, ValueError) as error:
                     raise RuntimeError(
-                        f"Cannot plan drop for object {active_object_id}: {error}"
+                        f"Cannot plan drop for object {active_object_id}: "
+                        f"{error}"
                     ) from error
-
-                active_trajectory = plan_payload_motion(
-                    current_q, drop_approach_q, active_payload_mass
-                )
                 active_motion = "carry_to_drop"
                 trajectory_sample_index = 0
                 motion_state = "executing"
                 print(
-                    f"Carrying object {active_object_id} "
-                    f"{'home' if active_returning_home else 'to drop'} "
+                    f"Carrying {active_payload_mass:.1f} kg payload to "
                     f"{active_drop_position.round(3)}."
                 )
 
@@ -637,7 +706,7 @@ while robot.step(timestep) != -1:
                 print(f"Lowering object {active_object_id} for placement.")
 
             elif active_motion == "place_descend":
-                # Release once the box reaches the table.
+                # Release at the table.
                 gripper.turnOff()
                 empty_hold = plan_empty_hold(current_q)
                 hold_q = current_q.copy()
@@ -652,7 +721,7 @@ while robot.step(timestep) != -1:
                 raise RuntimeError(f"Unknown motion phase: {active_motion}")
         elif robot.getTime() >= target_deadline:
             if active_motion == "place_descend":
-                # Table contact can stop the final part of the descent.
+                # Table contact may stop the descent early.
                 gripper.turnOff()
                 empty_hold = plan_empty_hold(current_q)
                 hold_q = current_q.copy()
@@ -665,7 +734,7 @@ while robot.step(timestep) != -1:
                     f"Object {active_object_id} reached the table; released."
                 )
             elif active_motion == "descend":
-                # Check for a vacuum link after a blocked grasp descent.
+                # Check attachment after a blocked descent.
                 hold_q = current_q.copy()
                 active_trajectory = None
                 motion_state = "verifying_grasp"
@@ -716,37 +785,80 @@ while robot.step(timestep) != -1:
             measured_qdot=current_qdot,
         )
         if robot.getTime() >= release_deadline:
-            completed_object_ids.add(active_object_id)
-            object_at_drop[active_object_id] = not active_returning_home
-            if not active_returning_home:
-                next_drop_index += 1
-            print(f"Object {active_object_id} placed. Looking for next object.")
+            if not RUN_SEQUENTIAL_PAYLOAD_BENCHMARK:
+                completed_object_ids.add(active_object_id)
+                object_at_drop[active_object_id] = not active_returning_home
+                if not active_returning_home:
+                    next_drop_index += 1
+                print(f"Object {active_object_id} placed. Looking for next object.")
+                active_object_id = None
+                active_object_position = None
+                active_drop_position = None
+                active_approach_q = None
+                active_motion = None
+                active_payload_mass = 0.0
+                active_returning_home = False
+                picked_object_id = None
+                if (
+                    len(object_home_positions) >= len(NORMAL_DROP_CENTERS)
+                    and len(completed_object_ids) >= len(object_home_positions)
+                ):
+                    completed_object_ids.clear()
+                    next_drop_index = 0
+                    print("Starting the next pick-and-place cycle.")
+                motion_state = "waiting_for_object"
+                continue
+
+            print(f"Completed {active_payload_mass:.1f} kg benchmark run.")
+            benchmark_payload_index += 1
+            benchmark_run = -1
             active_object_id = None
             active_object_position = None
             active_drop_position = None
             active_approach_q = None
             active_motion = None
             active_payload_mass = 0.0
-            active_returning_home = False
             picked_object_id = None
-            # Start the return leg after both boxes have moved.
-            if (
-                len(object_home_positions) >= len(DROP_OBJECT_CENTERS)
-                and len(completed_object_ids) >= len(object_home_positions)
-            ):
-                completed_object_ids.clear()
-                next_drop_index = 0
-                print("Starting the next pick-and-place cycle.")
-            motion_state = "waiting_for_object"
+            if benchmark_payload_index >= len(BENCHMARK_PAYLOADS):
+                print("All 0, 0.5, and 1.0 kg benchmark runs are complete.")
+                motion_state = "waiting_for_object"
+                continue
+
+            reset_benchmark_block(BENCHMARK_PAYLOADS[benchmark_payload_index])
+            detected_objects_robot.clear()
+            visited_object_positions.clear()
+            completed_object_ids.clear()
+            active_trajectory = quintic_trajectory(
+                start=current_q,
+                goal=HOME_Q,
+                duration=TRAJECTORY_DURATION,
+                sample_period=sample_period,
+            )
+            active_motion = "benchmark_reset"
+            trajectory_sample_index = 0
+            motion_state = "executing"
 
     elif motion_state == "waiting_for_object":
+        if (
+            RUN_SEQUENTIAL_PAYLOAD_BENCHMARK
+            and benchmark_payload_index >= len(BENCHMARK_PAYLOADS)
+        ):
+            command_torques(
+                desired_q=hold_q,
+                desired_qdot=np.zeros(6),
+                feedforward_torque=hold_torque,
+                measured_q=current_q,
+                measured_qdot=current_qdot,
+            )
+            continue
+
         object_to_visit = next_unvisited_object(
             detected_objects_robot,
             visited_object_positions,
             completed_object_ids,
         )
         if object_to_visit is None:
-            # Hold position until a target is available.
+            # Hold until a target appears.
             command_torques(
                 desired_q=hold_q,
                 desired_qdot=np.zeros(6),
@@ -766,7 +878,7 @@ while robot.step(timestep) != -1:
                 "approach",
             )
         except (RuntimeError, ValueError) as error:
-            # Skip this reading until the camera reports a new position.
+            # Wait for a new camera reading.
             visited_object_positions[object_id] = object_position.copy()
             print(f"Skipping camera object {object_id}: {error}")
             continue
@@ -780,10 +892,14 @@ while robot.step(timestep) != -1:
         active_object_id = object_id
         active_object_position = object_position
         object_home_positions.setdefault(object_id, object_position.copy())
-        object_payload_masses.setdefault(
-            object_id, payload_mass_for_camera_object(object_position)
-        )
-        active_payload_mass = object_payload_masses[object_id]
+        if RUN_SEQUENTIAL_PAYLOAD_BENCHMARK:
+            active_payload_mass = BENCHMARK_PAYLOADS[benchmark_payload_index]
+            benchmark_run = benchmark_payload_index
+        else:
+            active_payload_mass = object_payload_masses.setdefault(
+                object_id, normal_payload_mass(object_position)
+            )
+            benchmark_run = -1
         active_approach_q = target_q
         active_motion = "approach"
         trajectory_sample_index = 0

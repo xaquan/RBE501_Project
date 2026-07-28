@@ -8,4 +8,4 @@ orthographicViewHeight: 1
 textFiles: 0 "controllers/robot_controller/robot_controller.py" "libraries/DynamicalModel/ur5e_trajectory.py" "controllers/camera_controller/camera_controller.py"
 globalOptionalRendering: CoordinateSystem::CameraFrustums
 consoles: Console:All:All
-renderingDevicePerspectives: camera:overhead_camera;0;4.03125;0.0222874;0.00100806;2868;539;323;249;0
+renderingDevicePerspectives: camera:overhead_camera;0;4.03125;0.0222874;0.00100806;17;727;321;241;0

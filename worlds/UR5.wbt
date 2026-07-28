@@ -45,6 +45,7 @@ UR5e {
   hidden rotation_6 0.33816087606091516 0.9410883078437143 -0.0001368998491581317 5.170509687929607e-07
   name "UR5e(1)"
   controller "robot_controller"
+  supervisor TRUE
   toolSlot [
     VacuumGripper {
       name "vacuum_gripper"
@@ -119,22 +120,14 @@ DEF box1 Solid {
   }
   physics Physics {
     density -1
-    mass 1.0000000000000002
-    centerOfMass [
-      0 0 0
-    ]
-    inertiaMatrix [
-      0.0016666666666666674 0.0016666666666666674 0.0016666666666666674
-      0 0 0
-    ]
+    mass 1
   }
   recognitionColors [
     0 0 0
   ]
 }
 DEF box2 Solid {
-  translation 0.73 0.46 0.0498038
-  rotation -0.6478567621916407 0.7342376638172173 -0.20292035066695263 4.935415507748849e-17
+  translation 0.73 0.46 0.0498
   children [
     Shape {
       appearance PBRAppearance {
@@ -146,20 +139,12 @@ DEF box2 Solid {
       }
     }
   ]
-  name "solid(1)"
   boundingObject Box {
     size 0.1 0.1 0.1
   }
   physics Physics {
     density -1
     mass 0.5
-    centerOfMass [
-      0 0 0
-    ]
-    inertiaMatrix [
-      0.0016666666666666674 0.0016666666666666674 0.0016666666666666674
-      0 0 0
-    ]
   }
   recognitionColors [
     0 0 0
